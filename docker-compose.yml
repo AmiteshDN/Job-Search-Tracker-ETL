@@ -1,0 +1,184 @@
+version: "3.8"
+
+services:
+  hdfs-namenode:
+    #image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    image: chandravenkat/hadoop-namenode@sha256:51ad9293ec52083c5003ef0aaab00c3dd7d6335ddf495cc1257f97a272cab4c0
+    container_name: hdfs-namenode
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://hdfs-namenode:9000
+    ports:
+      - "9870:9870"
+    volumes:
+      - hdfs-nn-data:/hadoop/dfs/name
+      - ./spark-apps:/opt/spark-apps
+    networks:
+      - hadoopnet
+
+  hdfs-datanode:
+    #image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    image: chandravenkat/hadoop-datanode@sha256:ddf6e9ad55af4f73d2ccb6da31d9e3331ffb94d5f046126db4f40aa348d484bf
+    container_name: hdfs-datanode
+    depends_on:
+      - hdfs-namenode
+    environment:
+      - CLUSTER_NAME=hadoop-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://hdfs-namenode:9000
+      - HDFS_CONF_dfs_replication=1
+    volumes:
+      - hdfs-dn-data:/hadoop/dfs/data
+      - ./spark-apps:/opt/spark-apps
+    networks:
+      - hadoopnet
+
+  spark-master:
+    #image: bitnami/spark:3.2.1
+    image: chandravenkat/spark@sha256:4817c95e8ffd52500820f673fa8ab173f5f64631fff8523ec0b308ff9a4c921b
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    volumes:
+      - ./spark-apps:/opt/spark-apps
+      - ./spark-events:/tmp/spark-events
+    networks:
+      - hadoopnet
+
+  spark-worker:
+    #image: bitnami/spark:3.2.1
+    image: chandravenkat/spark@sha256:4817c95e8ffd52500820f673fa8ab173f5f64631fff8523ec0b308ff9a4c921b
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+    volumes:
+      - ./spark-apps:/opt/spark-apps
+    networks:
+      - hadoopnet
+      
+#  spark-history-server:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.history
+#    container_name: spark-history
+#    ports:
+#      - "18080:18080"
+#    volumes:
+#      - ./spark-events:/tmp/spark-events
+#      - ./spark-events/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
+#    environment:
+#      - SPARK_HISTORY_OPTS=-Dspark.history.fs.logDirectory=file:/tmp/spark-events
+#    command: ["/opt/spark/sbin/start-history-server.sh"]
+#    networks:
+#      - hadoopnet
+
+  jupyter:
+    #image: jupyter/pyspark-notebook:spark-3.2.1
+    image: chandravenkat/pyspark-notebook@sha256:1eafd3c101fae78a737f1cad8e50d611453bf75787fb39c55e87abbdb543eeac
+    container_name: jupyter-notebook
+    ports:
+      - "8888:8888"
+      - "4055:4040"
+    volumes:
+      - ./notebooks:/home/jovyan/work/customer_etl
+      - ./spark-apps/job_search_etl/scripts/:/home/jovyan/work/job_search_etl
+      - ./spark-apps:/opt/spark-apps
+      - ./spark-events:/tmp/spark-events
+    depends_on:
+      - spark-master
+    networks:
+      - hadoopnet
+    environment:
+      - SPARK_OPTS=--conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode:9000 --conf spark.master=spark://spark-master:7077
+      
+    #Cluster Mode
+    #environment:
+       #- "PYSPARK_SUBMIT_ARGS=--master spark://spark-master:7077 --conf spark.hadoop.fs.defaultFS=hdfs://hdfs-namenode:9000 --conf spark.driver.memory=1g --conf spark.executor.memory=1g --conf spark.executor.cores=1 --conf spark.sql.shuffle.partitions=8 pyspark-shell"
+    
+    #local mode
+    #environment:
+    #   - "PYSPARK_SUBMIT_ARGS=--master local[*] --conf spark.driver.memory=512m --conf spark.sql.shuffle.partitions=8 pyspark-shell"
+
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''
+
+  airflow-db:
+    image: postgres:13
+    container_name: airflow-db
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hadoopnet
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      - airflow-db
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
+      - AIRFLOW__WEBSERVER__SECRET_KEY=supersecretkey
+      - AIRFLOW_UID=50000
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark-apps:/opt/spark-apps
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./hadoop-config/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+    networks:
+      - hadoopnet
+    command: >
+      bash -c "
+        while ! pg_isready -h airflow-db -p 5432 -U airflow; do sleep 2; done &&
+        airflow db upgrade &&
+        airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com --password admin &&
+        airflow webserver"
+  
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      - airflow-webserver
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      - AIRFLOW__WEBSERVER__SECRET_KEY=supersecretkey
+      - AIRFLOW_UID=50000
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./spark-apps:/opt/spark-apps
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./hadoop-config/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml
+    networks:
+      - hadoopnet
+    command: >
+      bash -c "
+        while ! airflow db check 2>/dev/null; do echo 'Waiting for DB init...'; sleep 2; done &&
+        airflow scheduler"
+
+volumes:
+  postgres_data:
+  hdfs-nn-data:
+  hdfs-dn-data:
+
+networks:
+  hadoopnet:

@@ -1,0 +1,215 @@
+✅ 1. DATA CLEANING TRANSFORMATIONS
+
+These are basic cleanup ETL steps to make the dataset usable:
+
+(A) Standardize Organization Names
+
+Trim whitespace
+
+Normalize case (title or upper)
+
+Deduplicate slight variants (“TD Bank” vs. “TD”)
+
+(B) Standardize Job Title
+
+Normalize case
+
+Extract seniority level (Intern, Junior, New Grad, etc.)
+
+(C) Unify Date Formats
+
+Convert DATE OF APPLICATION to date type
+
+Add a yyyy-MM column (useful for month-wise stats)
+
+(D) Standardize Location Field
+
+Split into:
+
+city
+
+province/state
+
+country (infer default if missing)
+
+Normalize formatting
+
+(E) Boolean Normalization
+Columns like:
+
+INTERVIEW SCHEDULED
+
+FOLLOW-UP EMAIL
+…become True/False or Y/N.
+
+(F) Missing Value Treatment
+Fill nulls for:
+
+contact info → "N/A"
+
+link → "N/A"
+
+follow-up → "Pending"
+
+📦 2. ENRICHMENT / DERIVED FIELDS (ADDED COLUMNS)
+
+These transformations produce useful new columns.
+
+(1) Derived Employment Type
+From “TYPE OF EMPLOYMENT” derive standardized enums:
+
+Full-time / Part-time / Internship / Co-op / New Grad / Hybrid / Remote / On-site
+
+
+(2) Seniority Extraction
+From job title:
+
+Examples:
+
+Software Developer Intern → Intern
+Software Developer, New Grad → New Grad
+Backend Engineer → Mid-level (default)
+
+
+(3) Time-based Metrics
+Create columns:
+
+days_since_application
+
+week_of_year
+
+month
+
+quarter
+
+(4) Job Platform Extraction
+From link:
+
+Workday, Greenhouse, Lever, Direct, Email
+
+
+Detect using hostname parsing.
+
+(5) Contact Presence Flag
+
+has_recruiter_contact = contact_info != null
+
+
+(6) Follow-up Strategy Fields
+From status:
+
+need_follow_up = (Interview is null) AND (days_since_application > 7)
+
+
+(7) Stage Classification
+Define funnel stages:
+
+Applied → In Review → Interview → Offer → Rejected
+
+
+(If not tracked, you can add as manual editable column)
+
+📊 3. ANALYTICAL & AGGREGATION TRANSFORMATIONS
+
+This is the “insight” layer.
+
+Transformations include:
+
+A. Count-based Aggregations
+
+Group by:
+
+company
+
+job title
+
+city
+
+employment type
+
+date/month
+
+Examples:
+
+applications_per_month
+applications_per_company
+applications_per_city
+applications_by_platform
+
+B. Funnel Metrics
+
+If you add pipeline stages, aggregate:
+
+conversion_rate = interviews / applications
+offer_rate = offers / interviews
+
+C. Timing Metrics
+
+Useful for optimization:
+
+average_days_to_interview
+average_days_between_follow-ups
+
+D. Platform Effectiveness
+
+Measure success by job board:
+
+interview_rate_by_platform
+offer_rate_by_platform
+
+E. Salary Estimation (optional)
+
+If you enrich via external APIs (Glassdoor, Levels.fyi)
+
+🗺 4. DIMENSIONAL MODELING (OPTIONAL — FOR WAREHOUSE)
+
+For ETL pipelines, you can restructure into:
+
+Fact table
+fact_job_applications
+  - application_id
+  - date_id
+  - job_id
+  - org_id
+  - location_id
+  - platform_id
+  - stage
+  - follow_up_done
+  - interview_flag
+
+Dimension tables
+dim_job
+dim_organization
+dim_location
+dim_platform
+dim_date
+
+
+This allows BI tools (Superset/PowerBI) integrations later.
+
+🎯 5. POTENTIAL INSIGHTS EXPECTED
+
+Once the above transformations exist, insights become possible:
+
+✔ Which companies actually respond?
+✔ Which posting platforms lead to interviews?
+✔ Which cities have better hit rates?
+✔ Best time-of-year to apply?
+✔ Does follow-up increase interview probability?
+✔ How long before companies reply?
+
+Example insight output:
+
+Applications sent: 128
+Interviews received: 7
+Conversion: 5.4%
+Best month: January (18 applications, 3 interviews)
+Most effective platform: LinkedIn (12% conversion)
+Most responsive location: Toronto
+
+If You Want, I Can Also Provide:
+
+✔ The PySpark ETL code for these transformations
+✔ The schema planning for the CSV
+✔ A dashboard design for insights
+✔ A cloud pipeline plan (S3 + Glue + Athena + Quicksight / Snowflake)

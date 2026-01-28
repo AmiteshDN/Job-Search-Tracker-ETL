@@ -1,0 +1,9 @@
+# Ignore the content of these folders
+input/*
+output/*
+
+# But do NOT ignore the .gitkeep files inside them
+!.gitkeep
+
+# Ignore Jupyter temp files
+.ipynb_checkpoints/
